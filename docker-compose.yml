@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Primary Database: PostgreSQL + pgvector (Sections 10, 111-115)
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: alizia-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: alizia_admin
+      POSTGRES_PASSWORD: alizia_secure_password_dev
+      POSTGRES_DB: alizia_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./platform/db/schema.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alizia_admin -d alizia_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Cache, Rate Limits & Distributed Locks: Redis (Sections 10, 102)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: alizia-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # AI Model Gateway & Reasoning Orchestrator (Sections 8, 14-16, 39, 199)
+  # ---------------------------------------------------------------------------
+  ai-orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.ai
+    container_name: alizia-ai-orchestrator
+    restart: always
+    environment:
+      PORT: 8000
+      DATABASE_URL: postgresql://alizia_admin:alizia_secure_password_dev@postgres:5432/alizia_db
+      REDIS_URL: redis://redis:6379/0
+      DEFAULT_MODEL: alizia-nova
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Global API Gateway (Sections 7, 8, 161, 162, 176)
+  # ---------------------------------------------------------------------------
+  api-gateway:
+    build:
+      context: .
+      dockerfile: apps/api-gateway/Dockerfile
+    container_name: alizia-api-gateway
+    restart: always
+    environment:
+      PORT: 3000
+      AI_ORCHESTRATOR_URL: http://ai-orchestrator:8000
+      ACCOUNT_SERVICE_URL: http://account-service:3001
+      BILLING_SERVICE_URL: http://billing-service:3002
+    ports:
+      - "3000:3000"
+    depends_on:
+      - ai-orchestrator
+
+volumes:
+  postgres_data:
+  redis_data:

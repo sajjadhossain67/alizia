@@ -1,0 +1,27 @@
+{
+  "name": "alizia-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Alizia AI - Frontier Multimodal AI and Agent Backend Platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:gateway": "npm run dev --workspace=apps/api-gateway",
+    "dev:accounts": "npm run dev --workspace=apps/account-service",
+    "dev:billing": "npm run dev --workspace=apps/billing-service",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "model-gateway",
+    "orchestrator",
+    "rag",
+    "alizia"
+  ],
+  "author": "Alizia AI Engineering",
+  "license": "Proprietary"
+}
