@@ -119,6 +119,69 @@ curl -X POST http://localhost:8000/v1/responses \
   }'
 ```
 
+### Proof Mode Unified Responses (`POST /v1/responses` with `"proof": true`)
+```bash
+curl -X POST http://localhost:8000/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "alizia-nova",
+    "input": [
+      { "role": "user", "content": "Calculate 15 * 24 and explain the architecture of Alizia Nova." }
+    ],
+    "proof": true,
+    "stream": false
+  }'
+```
+
+**Additive Proof Response Envelope**:
+```json
+{
+  "id": "resp_098f6bcd4621d373ca",
+  "object": "response",
+  "model": "alizia-nova",
+  "status": "completed",
+  "output": [
+    { "type": "output_text", "text": "15 * 24 = 360. Alizia Nova provides 1,000,000 context reasoning." }
+  ],
+  "proof": {
+    "id": "prf_8a7c2e1b",
+    "confidence": 0.98,
+    "verifier_verdict": "PASS",
+    "unsupported_claims_count": 0,
+    "verification_latency_ms": 38.5,
+    "claims": [
+      {
+        "id": "clm_1",
+        "claim_text": "15 * 24 = 360",
+        "status": "verified",
+        "confidence": 1.0,
+        "tests": ["tst_1"],
+        "reasoning": "Algorithmically verified via Python Sandbox test."
+      }
+    ],
+    "sources": [
+      {
+        "id": "src_1",
+        "title": "Alizia Architecture Specification",
+        "url": "https://docs.alizia.ai/models/nova",
+        "snippet": "alizia-nova — Flagship reasoning engine with 1,000,000 token context window.",
+        "relevance_score": 0.98
+      }
+    ],
+    "tests": [
+      {
+        "id": "tst_1",
+        "test_type": "python_sandbox",
+        "code_or_assertion": "assert abs((15 * 24) - (360)) < 1e-6",
+        "passed": true,
+        "output": "Assertion passed cleanly.",
+        "execution_time_ms": 1.6
+      }
+    ]
+  }
+}
+```
+
 ### Server-Sent Events (SSE) Streaming
 ```bash
 curl -N -X POST http://localhost:8000/v1/responses \
@@ -126,9 +189,11 @@ curl -N -X POST http://localhost:8000/v1/responses \
   -d '{
     "model": "alizia-pulse",
     "input": [{ "role": "user", "content": "Tell me about Alizia AI." }],
+    "proof": true,
     "stream": true
   }'
 ```
+*Emits `event: response.output_text.delta` chunks followed by `event: response.proof` and `event: response.completed`.*
 
 ### Verifiable Agent Execution (`POST /v1/agents/runs`)
 ```bash
@@ -143,9 +208,43 @@ curl -X POST http://localhost:8000/v1/agents/runs \
 
 ---
 
-## 5. Security & Verification Guarantees
+## 5. Evaluation Harness & Continuous Benchmarks (`ai/evals/`)
 
-1. **Verifiable AI (Section 191)**: Completion strictly requires evidence (compiler results, test runs, or verified citation provenance). A language model saying "Done" alone is never sufficient.
+The platform contains a dedicated production evaluation harness benchmarking Alizia against Google Gemini:
+
+- **12 Core Evaluation Suites**:
+  1. `knowledge` (MMLU-Pro / GPQA style)
+  2. `math` (GSM8k & Olympiad proof verification)
+  3. `code` (HumanEval & AST parsing)
+  4. `instruction` (IFEval strict formatting constraints)
+  5. `safety` (HarmBench / Refusal robustness)
+  6. `multilingual` (Translation and cultural nuance)
+  7. `factuality` (Hallucination detection and citation recall)
+  8. `tool_use` (BFCL multi-turn tool calling)
+  9. `long_context` (Needle-in-a-Haystack at 128k - 1M tokens)
+  10. `multimodal` (Chart, UI, and visual reasoning)
+  11. `retrieval` (Dense & hybrid passage ranking)
+  12. `writing` (Stylistic voice and rubric synthesis)
+- **Scorers & Debiasing**:
+  - Deterministic exact-match and math tolerance checks.
+  - LLM Judge with position-swap debiasing `(A, B)` and `(B, A)` to eliminate positional bias.
+  - Pairwise Elo arena with 95% bootstrap confidence intervals.
+  - Dataset contamination detection (canary GUIDs & 8-gram overlap).
+- **Execution & CI Gate**:
+  ```bash
+  # Run evaluations via CLI
+  python -m ai.evals.cli run --model alizia-nova --limit 5
+  
+  # Run regression gate with baseline comparison
+  python -m ai.evals.cli gate --baseline docs/evals/baseline.md --candidate docs/evals/candidate.md
+  ```
+
+---
+
+## 6. Security & Verification Guarantees
+
+1. **Proof Mode (Section 191 & Sprint 2)**: Decomposes answers into atomic claims, grounded across cited source spans and verified via ephemeral Python sandbox assertion executions.
 2. **Multi-Layer Safety & Secrets Redaction (Section 71-77)**: Automatically sanitizes sensitive keys (`alz_live_*`, `sk-*`, JWTs, private keys) and enforces trust levels (`trusted`, `authorized`, `untrusted_data`) to prevent indirect prompt injection.
 3. **Action Risk Engine (Section 74-75)**: Actions are ranked from R0 (informational) to R4 (destructive). Sensitive actions require cryptographic confirmation tokens before execution.
 4. **Strict Tenant Isolation (Section 78, 124)**: Database queries and vector retrieval enforce organization boundaries (`organization_id`) before vector similarity computation.
+

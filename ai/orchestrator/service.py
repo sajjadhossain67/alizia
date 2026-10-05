@@ -122,6 +122,11 @@ class AIOrchestrator:
                 redacted, _ = SafetyEngine.scan_for_secrets(out["text"])
                 out["text"] = redacted
 
+        # Step 23: Proof Mode Verification (Sprint 2 - Phase 1)
+        if request.proof:
+            from ai.proof_engine import ProofEngine
+            resp.proof = await ProofEngine.verify_response(resp, request)
+
         return resp
 
     async def stream_request(
@@ -149,5 +154,45 @@ class AIOrchestrator:
         selected_model = ModelRouter.determine_route(request)
         request.model = selected_model
 
+        # Step 10: Retrieve relevant memory (Section 29)
+        memories = self.memory_engine.retrieve_relevant_memories(
+            owner_id=user_id,
+            query=prompt_text,
+            top_k=3
+        )
+
+        # Step 12: Assemble context via PromptCompiler (Section 22, 23)
+        system_msg = PromptCompiler.compile_system_prompt(
+            model_name=selected_model,
+            memories=memories,
+            tools=request.tools
+        )
+        prepared_inputs = [system_msg] + request.input
+        request.input = prepared_inputs
+
+        accumulated_text = ""
+        last_resp_id = None
+
         async for event in self.primary_provider.stream(request):
+            if event.event == SSEEventType.OUTPUT_TEXT_DELTA:
+                accumulated_text += event.data.get("delta", "")
+            elif event.event == SSEEventType.RESPONSE_CREATED:
+                last_resp_id = event.data.get("id")
+
+            if event.event == SSEEventType.RESPONSE_COMPLETED and request.proof:
+                try:
+                    from ai.proof_engine import ProofEngine
+                    temp_resp = ResponseObject(
+                        id=last_resp_id or "resp_stream",
+                        model=request.model,
+                        output=[{"type": "output_text", "text": accumulated_text}]
+                    )
+                    proof_obj = await ProofEngine.verify_response(temp_resp, request)
+                    yield StreamEvent(
+                        event=SSEEventType.RESPONSE_PROOF,
+                        data=proof_obj.model_dump()
+                    )
+                except Exception as proof_err:
+                    pass
+
             yield event

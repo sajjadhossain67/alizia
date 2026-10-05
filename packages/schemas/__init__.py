@@ -29,6 +29,12 @@ from packages.schemas.models import (
     EmbeddingResponse,
     APIErrorDetails,
     APIErrorResponse,
+    ClaimVerificationStatus,
+    ProofSource,
+    ToolRunEvidence,
+    TestExecutionEvidence,
+    ClaimItem,
+    ProofObject,
 )
 
 __all__ = [
@@ -62,4 +68,10 @@ __all__ = [
     "EmbeddingResponse",
     "APIErrorDetails",
     "APIErrorResponse",
+    "ClaimVerificationStatus",
+    "ProofSource",
+    "ToolRunEvidence",
+    "TestExecutionEvidence",
+    "ClaimItem",
+    "ProofObject",
 ]

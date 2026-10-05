@@ -1,0 +1,21 @@
+{
+  "name": "Math Proof & Derivation Rubric",
+  "version": "1.0.0",
+  "criteria": [
+    {
+      "name": "logical_derivation",
+      "weight": 0.4,
+      "description": "Each derivation step follows mathematically from preceding steps with explicit justification."
+    },
+    {
+      "name": "arithmetic_precision",
+      "weight": 0.3,
+      "description": "Zero intermediate computational or sign errors."
+    },
+    {
+      "name": "final_answer_correctness",
+      "weight": 0.3,
+      "description": "Final numerical value or formula matches ground truth within tolerance."
+    }
+  ]
+}

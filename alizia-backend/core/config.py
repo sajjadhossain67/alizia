@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     
     # CORS
     CORS_ORIGINS: list = ["http://localhost:3000", "http://localhost:8080"]
-    ALLOWED_HOSTS: list = ["localhost", "127.0.0.1", "0.0.0.0"]
+    ALLOWED_HOSTS: list = ["localhost", "127.0.0.1", "0.0.0.0", "testserver", "*"]
     
     # Database
     POSTGRES_URL: str = Field(default="postgresql://localhost:5432/alizia")

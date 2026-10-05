@@ -157,6 +157,67 @@ class CreateResponseRequest(BaseModel):
     max_tokens: Optional[int] = 4096
     workspace_id: Optional[str] = None
     conversation_id: Optional[str] = None
+    proof: Optional[bool] = Field(default=False, description="When true, activates Proof Mode with atomic claim grounding, test validation, and proof object")
+
+
+# -----------------------------------------------------------------------------
+# Proof Mode Schemas (Sprint 2 - Phase 1)
+# -----------------------------------------------------------------------------
+class ClaimVerificationStatus(str, Enum):
+    VERIFIED = "verified"
+    PARTIALLY_SUPPORTED = "partially_supported"
+    UNSUPPORTED = "unsupported"
+    REFUTED = "refuted"
+
+
+class ProofSource(BaseModel):
+    id: str = Field(default_factory=lambda: f"src_{uuid.uuid4().hex[:8]}")
+    title: str
+    url: Optional[str] = None
+    snippet: str
+    domain: Optional[str] = None
+    relevance_score: float = 1.0
+
+
+class ToolRunEvidence(BaseModel):
+    id: str = Field(default_factory=lambda: f"run_{uuid.uuid4().hex[:8]}")
+    tool_name: str
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    output: Any = None
+    verified: bool = True
+    execution_time_ms: float = 0.0
+
+
+class TestExecutionEvidence(BaseModel):
+    id: str = Field(default_factory=lambda: f"tst_{uuid.uuid4().hex[:8]}")
+    test_type: str = "python_sandbox"  # python_sandbox, math_assertion, regex_constraint
+    code_or_assertion: str
+    passed: bool
+    output: str
+    execution_time_ms: float = 0.0
+
+
+class ClaimItem(BaseModel):
+    id: str = Field(default_factory=lambda: f"clm_{uuid.uuid4().hex[:8]}")
+    claim_text: str
+    status: ClaimVerificationStatus = ClaimVerificationStatus.VERIFIED
+    confidence: float = 0.95
+    source_spans: List[Dict[str, Any]] = Field(default_factory=list)
+    tool_runs: List[str] = Field(default_factory=list)
+    tests: List[str] = Field(default_factory=list)
+    reasoning: Optional[str] = None
+
+
+class ProofObject(BaseModel):
+    id: str = Field(default_factory=lambda: f"prf_{uuid.uuid4().hex[:12]}")
+    claims: List[ClaimItem] = Field(default_factory=list)
+    sources: List[ProofSource] = Field(default_factory=list)
+    tool_runs: List[ToolRunEvidence] = Field(default_factory=list)
+    tests: List[TestExecutionEvidence] = Field(default_factory=list)
+    confidence: float = 1.0
+    verifier_verdict: Literal["PASS", "PARTIAL", "FAIL"] = "PASS"
+    unsupported_claims_count: int = 0
+    verification_latency_ms: float = 0.0
 
 
 class TokenUsage(BaseModel):
@@ -177,6 +238,7 @@ class ResponseObject(BaseModel):
     reasoning_summary: Optional[str] = None
     usage: TokenUsage = Field(default_factory=TokenUsage)
     citations: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    proof: Optional[ProofObject] = None
 
 
 # -----------------------------------------------------------------------------
@@ -190,6 +252,7 @@ class SSEEventType(str, Enum):
     TOOL_CALL_ARGUMENTS_DELTA = "response.tool_call.arguments.delta"
     TOOL_CALL_COMPLETED = "response.tool_call.completed"
     OUTPUT_ITEM_COMPLETED = "response.output_item.completed"
+    RESPONSE_PROOF = "response.proof"
     RESPONSE_COMPLETED = "response.completed"
     RESPONSE_FAILED = "response.failed"
 

@@ -1,0 +1,26 @@
+{
+  "name": "Writing Quality & Tone Rubric",
+  "version": "1.0.0",
+  "criteria": [
+    {
+      "name": "answer_first",
+      "weight": 0.25,
+      "description": "Leads directly with conclusion/actionable answer without unnecessary throat-clearing preamble."
+    },
+    {
+      "name": "clarity_and_conciseness",
+      "weight": 0.25,
+      "description": "Maximum information density with zero repetitive padding or generic buzzwords."
+    },
+    {
+      "name": "truthfulness_and_calibration",
+      "weight": 0.25,
+      "description": "Does not fabricate facts or packages; states bounds of certainty appropriately."
+    },
+    {
+      "name": "human_tone_no_sycophancy",
+      "weight": 0.25,
+      "description": "Warm and professional without fake flattery, moralizing, or clinical coldness."
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "Code Review & Architecture Rubric",
+  "version": "1.0.0",
+  "criteria": [
+    {
+      "name": "functional_correctness",
+      "weight": 0.4,
+      "description": "Code handles specified requirements, edge cases, zero off-by-one errors, and passes unit tests."
+    },
+    {
+      "name": "security_and_injection_safety",
+      "weight": 0.3,
+      "description": "Zero injection vectors, safe handling of input sanitization, and no hardcoded credentials."
+    },
+    {
+      "name": "maintainability_and_style",
+      "weight": 0.3,
+      "description": "Clean modular functions, typed interfaces, and minimal safe diffs."
+    }
+  ]
+}
