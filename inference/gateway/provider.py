@@ -41,7 +41,7 @@ from packages.schemas.models import (
 
 logger = logging.getLogger("alizia.inference")
 
-DEFAULT_GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+DEFAULT_GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "your_gemini_api_key_here")
 DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 FALLBACK_GEMINI_MODELS = [
     "gemini-flash-lite-latest",
