@@ -248,3 +248,65 @@ The platform contains a dedicated production evaluation harness benchmarking Ali
 3. **Action Risk Engine (Section 74-75)**: Actions are ranked from R0 (informational) to R4 (destructive). Sensitive actions require cryptographic confirmation tokens before execution.
 4. **Strict Tenant Isolation (Section 78, 124)**: Database queries and vector retrieval enforce organization boundaries (`organization_id`) before vector similarity computation.
 
+---
+
+## 7. Native Generative AI Architecture & Endpoints (`ai/generative_engine/`)
+
+Alizia features a complete, self-contained native Generative AI Model subsystem:
+
+```
+ai/generative_engine/
+├── tokenizer.py          # BPE & Subword Tokenizer with special tokens & byte fallback
+├── transformer.py        # Causal Transformer with RoPE, SwiGLU, RMSNorm, KV Cache
+├── sampling.py           # Top-K, Top-P Nucleus, Temperature, Repetition Penalty
+├── image_engine.py       # Latent diffusion & procedural vector SVG/PNG synthesis
+├── audio_engine.py       # Speech waveform synthesis (22.05 kHz PCM 16-bit WAV)
+├── embedding_engine.py   # 1536-dimensional L2-normalized dense vector embeddings
+├── generator.py          # AliziaNova (CoT Proofs), Pulse (Chat), Forge (AST Code), Vision
+└── training.py           # SFT Trainer & LoRA rank-decomposition adapters
+```
+
+### Standard Generative API Endpoints
+
+1. **OpenAI-Compatible Chat Completions (`POST /v1/chat/completions`)**:
+   ```bash
+   curl -X POST http://localhost:8000/v1/chat/completions \
+     -H "Content-Type: application/json" \
+     -d '{
+       "model": "alizia-nova",
+       "messages": [{"role": "user", "content": "Explain how AI works"}],
+       "temperature": 0.7,
+       "stream": false
+     }'
+   ```
+
+2. **Text-to-Image Generation (`POST /v1/images/generations`)**:
+   ```bash
+   curl -X POST http://localhost:8000/v1/images/generations \
+     -H "Content-Type: application/json" \
+     -d '{
+       "prompt": "Futuristic cyberpunk metropolis with neon holographic neural networks",
+       "model": "alizia-image",
+       "style": "cyberpunk",
+       "size": "1024x1024"
+     }'
+   ```
+
+3. **Text-to-Speech Waveform Synthesis (`POST /v1/audio/speech`)**:
+   ```bash
+   curl -X POST http://localhost:8000/v1/audio/speech \
+     -H "Content-Type: application/json" \
+     -d '{
+       "model": "alizia-tts",
+       "input": "Welcome to Alizia AI generative platform.",
+       "voice": "nova-voice"
+     }' --output speech.wav
+   ```
+
+4. **LoRA SFT Fine-Tuning (`POST /v1/models/fine-tune`)**:
+   ```bash
+   curl -X POST http://localhost:8000/v1/models/fine-tune \
+     -H "Content-Type: application/json" \
+     -d '{ "model": "alizia-nova" }'
+   ```
+

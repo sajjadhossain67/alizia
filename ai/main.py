@@ -35,6 +35,17 @@ from packages.schemas.models import (
     MemoryObject,
     APIErrorResponse,
     APIErrorDetails,
+    ChatCompletionRequest,
+    ChatCompletionResponse,
+    ChatCompletionChoice,
+    ChatCompletionMessage,
+    ImageGenerationRequest,
+    ImageGenerationResponse,
+    ImageObject,
+    AudioSpeechRequest,
+    FineTuningJobRequest,
+    MessageItem,
+    MessageRole,
 )
 from ai.orchestrator.service import AIOrchestrator
 from ai.memory_engine.memory import MemoryEngine
@@ -45,11 +56,18 @@ from inference.gateway.provider import (
     AliziaNativeProvider,
     FallbackProvider,
     GeminiProvider,
-    DEFAULT_GEMINI_API_KEY,
     DEFAULT_GEMINI_MODEL,
-    FALLBACK_GEMINI_MODEL,
     GEMINI_BASE_URL,
 )
+from ai.generative_engine.generator import (
+    AliziaGenerativeEngine,
+    AliziaImageGenerator,
+    AliziaAudioGenerator,
+    AliziaEmbeddingGenerator,
+)
+from ai.generative_engine.image_engine import ImageGenerationConfig
+from ai.generative_engine.audio_engine import AudioSpeechConfig
+from ai.generative_engine.training import SFTTrainer, FineTuningDataset, TrainingSample
 
 
 app = FastAPI(
@@ -84,6 +102,7 @@ orchestrator = AIOrchestrator(
     primary_provider=primary_provider,
     fallback_provider=fallback_provider,
 )
+generative_engine = AliziaGenerativeEngine()
 
 # In-memory storage for active agent runs
 agent_runs_db: Dict[str, AgentRunObject] = {}
@@ -132,6 +151,22 @@ async def request_lifecycle_middleware(request: Request, call_next):
     }
 )
 async def create_response(req_body: CreateResponseRequest, request: Request):
+    # Debug: print model type
+    import sys
+    print(f"DEBUG: req_body.model type = {type(req_body.model)}, value = {req_body.model!r}", file=sys.stderr)
+    
+    # Ensure model is a string - handle edge cases from request parsing
+    if not isinstance(req_body.model, str):
+        # Try to extract string from various dict formats
+        if isinstance(req_body.model, dict) and 'model' in req_body.model:
+            req_body.model = str(req_body.model['model'])
+        elif isinstance(req_body.model, dict):
+            req_body.model = str(list(req_body.model.keys())[0]) if req_body.model else "alizia-nova"
+        else:
+            req_body.model = "alizia-nova"
+    else:
+        req_body.model = str(req_body.model)
+    
     req_id = request.state.request_id
     org_id = request.state.org_id
     user_id = request.state.user_id
@@ -386,9 +421,177 @@ async def list_models():
                 "description": "1536-dimensional embedding model for vector search and RAG",
                 "capabilities": ["semantic_search", "clustering", "rag"],
                 "dimensions": 1536
+            },
+            {
+                "id": "alizia-image",
+                "object": "model",
+                "description": "Generative text-to-image latent diffusion & vector synthesis model",
+                "capabilities": ["text_to_image", "procedural_vector", "png_rendering", "style_transfer"]
+            },
+            {
+                "id": "alizia-tts",
+                "object": "model",
+                "description": "Generative text-to-speech waveform audio synthesis model",
+                "capabilities": ["speech_synthesis", "pcm_waveform", "voice_personalities"]
             }
         ]
     }
+
+
+# -----------------------------------------------------------------------------
+# Generative AI Endpoints (OpenAI, Multimodal & Speech Compatibility)
+# -----------------------------------------------------------------------------
+@app.post("/v1/chat/completions", response_model=None)
+async def chat_completions(req_body: ChatCompletionRequest, request: Request):
+    """
+    OpenAI-compatible Chat Completions API with streaming SSE and deep reasoning support.
+    """
+    prompt_text = "\n".join(f"{m.role}: {m.content}" for m in req_body.messages)
+
+    if req_body.stream:
+        async def event_generator():
+            async for token_chunk, is_thought, tool_call in generative_engine.stream_tokens(
+                model_name=req_body.model,
+                prompt=prompt_text
+            ):
+                if tool_call:
+                    chunk_data = {
+                        "id": f"chatcmpl_{uuid.uuid4().hex[:18]}",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": req_body.model,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [{
+                                    "id": tool_call["id"],
+                                    "type": "function",
+                                    "function": {
+                                        "name": tool_call["name"],
+                                        "arguments": json.dumps(tool_call["arguments"])
+                                    }
+                                }]
+                            },
+                            "finish_reason": None
+                        }]
+                    }
+                else:
+                    chunk_data = {
+                        "id": f"chatcmpl_{uuid.uuid4().hex[:18]}",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": req_body.model,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {"content": token_chunk},
+                            "finish_reason": None
+                        }]
+                    }
+                yield f"data: {json.dumps(chunk_data)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return Response(content=event_generator(), media_type="text/event-stream")
+
+    # Non-streaming chat completion
+    gen_res = await generative_engine.generate(
+        model_name=req_body.model,
+        prompt=prompt_text,
+        temperature=req_body.temperature or 0.7,
+        max_tokens=req_body.max_tokens or 2048
+    )
+
+    return ChatCompletionResponse(
+        model=req_body.model,
+        choices=[ChatCompletionChoice(
+            index=0,
+            message=ChatCompletionMessage(role="assistant", content=gen_res["text"]),
+            finish_reason="stop"
+        )],
+        usage=gen_res.get("usage", {
+            "prompt_tokens": len(prompt_text) // 4,
+            "completion_tokens": len(gen_res["text"]) // 4,
+            "total_tokens": (len(prompt_text) + len(gen_res["text"])) // 4
+        })
+    )
+
+
+@app.post("/v1/images/generations", response_model=ImageGenerationResponse)
+async def generate_images(req_body: ImageGenerationRequest, request: Request):
+    """
+    Text-to-Image Generative API.
+    Synthesizes real PNG images and SVG vector graphics from text prompts.
+    """
+    w, h = 1024, 1024
+    if req_body.size and "x" in req_body.size:
+        try:
+            parts = req_body.size.split("x")
+            w, h = int(parts[0]), int(parts[1])
+        except Exception:
+            w, h = 1024, 1024
+
+    config = ImageGenerationConfig(
+        prompt=req_body.prompt,
+        width=w,
+        height=h,
+        style=req_body.style or "photorealistic"
+    )
+    img_res = generative_engine.image_engine.generate(config)
+
+    return ImageGenerationResponse(
+        data=[ImageObject(
+            b64_json=img_res["b64_json"] if req_body.response_format != "url" else None,
+            url=img_res["data_uri"] if req_body.response_format == "url" else None,
+            revised_prompt=f"{req_body.prompt} (Synthesized with Alizia Generative Diffusion Engine)"
+        )]
+    )
+
+
+@app.post("/v1/audio/speech")
+async def generate_speech(req_body: AudioSpeechRequest, request: Request):
+    """
+    Text-to-Speech Generative Waveform API.
+    Synthesizes binary PCM audio WAV stream matching the given prompt text.
+    """
+    config = AudioSpeechConfig(
+        input_text=req_body.input,
+        voice=req_body.voice,
+        speed=req_body.speed or 1.0
+    )
+    audio_res = generative_engine.audio_engine.generate(config)
+    return Response(content=audio_res["wav_bytes"], media_type="audio/wav")
+
+
+# Store fine-tuning jobs in memory
+fine_tuning_jobs_db: Dict[str, Dict[str, Any]] = {}
+
+
+@app.post("/v1/models/fine-tune")
+async def fine_tune_model(req_body: FineTuningJobRequest, request: Request):
+    """
+    Initiates an SFT LoRA fine-tuning training job on the specified model.
+    """
+    trainer = SFTTrainer(base_model_name=req_body.model)
+    # Default instruction dataset for demonstration
+    samples = [
+        TrainingSample(prompt="Analyze concurrency bottlenecks", completion="Verify lock acquisition ordering and lock contention metrics."),
+        TrainingSample(prompt="Refactor Python class with AST", completion="Use ast.NodeTransformer with syntax invariant validation."),
+        TrainingSample(prompt="Explain Raft consensus", completion="Raft enforces strict leader-to-follower log replication.")
+    ]
+    dataset = FineTuningDataset(samples)
+    job_result = trainer.train(dataset)
+    fine_tuning_jobs_db[job_result["job_id"]] = job_result
+    return job_result
+
+
+@app.get("/v1/models/fine-tune/{job_id}")
+async def get_fine_tuning_job(job_id: str):
+    """
+    Retrieves status and training metrics for a fine-tuning job.
+    """
+    job = fine_tuning_jobs_db.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Fine-tuning job {job_id} not found.")
+    return job
 
 
 @app.get("/health")
@@ -400,8 +603,8 @@ async def health_check():
         "version": "1.0.0",
         "provider": "Google Gemini Flash (Production Gateway)",
         "default_model": DEFAULT_GEMINI_MODEL,
-        "fallback_model": FALLBACK_GEMINI_MODEL,
-        "hardcoded_api_key_configured": True
+        "fallback_model": os.getenv("FALLBACK_GEMINI_MODEL", "gemini-flash-lite-latest"),
+        "hardcoded_api_key_configured": True,
     }
 
 
@@ -795,6 +998,8 @@ async def playground_ui():
           <option value="alizia-pulse">alizia-pulse (Low Latency Chat)</option>
           <option value="alizia-forge">alizia-forge (Code & Systems)</option>
           <option value="alizia-vision">alizia-vision (Multimodal)</option>
+          <option value="alizia-image">alizia-image (Diffusion Text-to-Image)</option>
+          <option value="alizia-tts">alizia-tts (Speech Audio Waveform)</option>
         </select>
       </div>
 
@@ -827,8 +1032,11 @@ async def playground_ui():
       <div class="chip" onclick="setPrompt('Write a python function to refactor a class with AST syntax verification')">
         Python AST Refactoring
       </div>
-      <div class="chip" onclick="setPrompt('Analyze design tradeoffs between event-driven microservices vs synchronous gRPC')">
-        Event-Driven vs gRPC
+      <div class="chip" onclick="document.getElementById('modelSelect').value='alizia-image'; setPrompt('Futuristic cyberpunk operating system skyline with neon holographic networks');">
+        Generate Image (Diffusion)
+      </div>
+      <div class="chip" onclick="document.getElementById('modelSelect').value='alizia-tts'; setPrompt('Welcome to Alizia AI, the frontier multimodal and generative platform.');">
+        Synthesize Voice (Audio)
       </div>
     </div>
 
@@ -923,14 +1131,56 @@ async def playground_ui():
 
       const startTime = performance.now();
 
-      const requestPayload = {
-        model: model,
-        input: [{ role: 'user', content: prompt }],
-        reasoning: { effort: reasoningEffort },
-        stream: isStream
-      };
-
       try {
+        if (model === 'alizia-image') {
+          responseBody.innerHTML = '<span style="color:#64748b;">Synthesizing visual latent diffusion composition...</span>';
+          const res = await fetch('/v1/images/generations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: prompt, model: 'alizia-image', response_format: 'url', style: 'digital-art' })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error?.message || `HTTP ${res.status}`);
+          const imgUrl = data.data?.[0]?.url;
+          responseBody.innerHTML = `
+            <div style="display:flex; flex-direction:column; align-items:center; gap:0.75rem; padding:1rem 0;">
+              <img src="${imgUrl}" alt="Synthesized Image" style="max-width:100%; max-height:420px; border-radius:14px; border:1px solid rgba(99,102,241,0.5); box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
+              <div style="color:#94a3b8; font-size:0.85rem;">Synthesized with Alizia Generative Diffusion Engine (1024x1024)</div>
+            </div>`;
+          tokensVal.innerText = '1 image';
+          return;
+        }
+
+        if (model === 'alizia-tts') {
+          responseBody.innerHTML = '<span style="color:#64748b;">Synthesizing speech audio waveform...</span>';
+          const res = await fetch('/v1/audio/speech', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ input: prompt, voice: 'nova-voice', speed: 1.0 })
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to synthesize audio`);
+          const blob = await res.blob();
+          const audioUrl = URL.createObjectURL(blob);
+          responseBody.innerHTML = `
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1.25rem; padding:2rem 1rem;">
+              <div style="color:#38bdf8; font-weight:600; font-size:1.1rem; display:flex; align-items:center; gap:0.5rem;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                Alizia Generative Speech Synthesized
+              </div>
+              <audio controls autoplay src="${audioUrl}" style="width:100%; max-width:440px; border-radius:8px;"></audio>
+              <div style="color:#64748b; font-size:0.8rem;">22.05 kHz &bull; PCM 16-bit &bull; Voice: nova-voice</div>
+            </div>`;
+          tokensVal.innerText = 'audio/wav';
+          return;
+        }
+
+        const requestPayload = {
+          model: model,
+          input: [{ role: 'user', content: prompt }],
+          reasoning: { effort: reasoningEffort },
+          stream: isStream
+        };
+
         if (isStream) {
           const res = await fetch('/v1/responses', {
             method: 'POST',

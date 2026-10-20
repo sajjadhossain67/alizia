@@ -352,3 +352,76 @@ class APIErrorDetails(BaseModel):
 
 class APIErrorResponse(BaseModel):
     error: APIErrorDetails
+
+
+# -----------------------------------------------------------------------------
+# Generative AI Model Standard Schemas (OpenAI / Multimodal Compatibility)
+# -----------------------------------------------------------------------------
+class ChatCompletionMessage(BaseModel):
+    role: str
+    content: str
+    name: Optional[str] = None
+
+
+class ChatCompletionRequest(BaseModel):
+    model: str = "alizia-nova"
+    messages: List[ChatCompletionMessage]
+    temperature: Optional[float] = 0.7
+    top_p: Optional[float] = 0.9
+    n: Optional[int] = 1
+    stream: Optional[bool] = False
+    stop: Optional[Union[str, List[str]]] = None
+    max_tokens: Optional[int] = 2048
+    presence_penalty: Optional[float] = 0.0
+    frequency_penalty: Optional[float] = 0.0
+
+
+class ChatCompletionChoice(BaseModel):
+    index: int = 0
+    message: ChatCompletionMessage
+    finish_reason: str = "stop"
+
+
+class ChatCompletionResponse(BaseModel):
+    id: str = Field(default_factory=lambda: f"chatcmpl_{uuid.uuid4().hex[:24]}")
+    object: str = "chat.completion"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    model: str
+    choices: List[ChatCompletionChoice]
+    usage: Dict[str, int]
+
+
+class ImageGenerationRequest(BaseModel):
+    prompt: str
+    model: Optional[str] = "alizia-image"
+    n: Optional[int] = 1
+    size: Optional[str] = "1024x1024"
+    response_format: Optional[str] = "b64_json"  # url, b64_json
+    style: Optional[str] = "photorealistic"
+    quality: Optional[str] = "standard"
+
+
+class ImageObject(BaseModel):
+    b64_json: Optional[str] = None
+    url: Optional[str] = None
+    revised_prompt: Optional[str] = None
+
+
+class ImageGenerationResponse(BaseModel):
+    created: int = Field(default_factory=lambda: int(time.time()))
+    data: List[ImageObject]
+
+
+class AudioSpeechRequest(BaseModel):
+    model: str = "alizia-tts"
+    input: str
+    voice: str = "nova-voice"
+    response_format: Optional[str] = "wav"
+    speed: Optional[float] = 1.0
+
+
+class FineTuningJobRequest(BaseModel):
+    model: str = "alizia-nova"
+    training_file: Optional[str] = None
+    hyperparameters: Optional[Dict[str, Any]] = None
+

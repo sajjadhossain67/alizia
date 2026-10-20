@@ -1,0 +1,195 @@
+// Prisma schema for Alizia AI Platform
+// Auto-generated for modular monolith backend
+// Models aligned with PRD Sections 27-30, 111-115, 124, 130
+
+generator client {
+  provider = "postgresql"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ Auth & Accounts ============
+account {
+  id         String   @id @default(auto()) @map("_id")
+  email      String   @unique
+  name       String?
+  picture    String?
+  password   String   // hashed
+  role       String   @default("member")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ============ Conversations & Messages ============
+conversation {
+  id          String   @id @default(auto()) @map("_id")
+  title       String
+  model       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        account  @fields: [userId]
+  userId      String
+  messages    message[]
+  artifacts   artifact[]
+}
+
+message {
+  id          String   @id @default(auto()) @map("_id")
+  role        String
+  content     String   // JSON serialized
+  createdAt   DateTime @default(now())
+  parts       Json?    // structured parts (tool calls, citations, etc)
+  attachments artifact[]
+}
+
+artifact {
+  id          String   @id @default(auto()) @map("_id")
+  key         String   // S3 object key or path
+  name        String
+  type        String   // "image", "code", "document", etc
+  conversation String   // optional: link to conversation
+  createdAt   DateTime @default(now())
+}
+
+// ============ Memory System (PRD Sections 27-30) ============
+memory {
+  id         String   @id @default(auto()) @map("_id")
+  owner      account  @fields: [id]
+  scope      String   // "session", "user", "workspace", "agent"
+  content    String
+  importance Float     // 0.0 - 1.0
+  confidence Float     // 0.0 - 1.0
+  embedding  Float[]  // pgvector array
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime
+  tenant     String   // for isolation
+
+  @@ index([scope, owner, tenant])
+}
+
+// Memory embedding vector index
+@@ extension pgvector
+
+// ============ RAG & Knowledge Base (PRD Sections 31-33, 124) ============
+knowledge_base {
+  id        String   @id @default(auto()) @map("_id")
+  name      String
+  owner     account  @fields: [id]
+  createdAt DateTime @default(nowUpdatedAt)
+}
+
+document {
+  id          String   @id @default(auto()) @map("_id")
+  knowledge   knowledge @relation(fields: [knowledgeId], references: [id])
+  knowledgeId String
+  filename    String
+  size        Int
+  mimeType    String
+  status      String   // "pending", "processed", "failed"
+  createdAt   DateTime @default(now())
+}
+
+document_chunk {
+  id         String   @id @default(auto()) @map("_id")
+  document   document @relation(fields: [documentId], references: [id])
+  documentId String
+  organization String  // for tenant isolation (PRD Sec 124)
+  text       String
+  embedding  Float[] // pgvector
+  metadata   Json
+  createdAt  DateTime @default(now())
+
+  @@ index([organization, embedding])
+}
+
+// ============ Tool Definitions & Executions (PRD Sections 45-53, 49) ============
+tool_definition {
+  id   String   @id @default(auto()) @map("_id")
+  name  String  unique
+  description String
+  parameters Json  // JSON schema
+  risk_level    RiskLevel // R0-R4
+  permission_scope String
+  createdAt DateTime @default(now())
+}
+
+tool_execution {
+  id           String   @id @default(auto()) @map("_id")
+  tool_name    String
+  arguments    Json
+  status       String   // "success", "failed", "requires_confirmation", "denied"
+  output       Json?
+  executed_by  account  @fields: [id]
+  executed_at  DateTime
+  confirmation_token String?
+  risk_level    RiskLevel
+  organization  String  // for isolation
+}
+
+// ============ Agent Runs (PRD Sections 39-44, 145-147, 191) ============
+agent_run {
+  id          String   @id @default(auto()) @map("_id")
+  goal        String
+  status      AgentState // enum: queued, planning, running, waiting_for_tool, waiting_for_user, verifying, completed, failed, cancelled, expired
+  current_step Int
+  max_steps   Int
+  workspace   String?
+  organization String
+  plan        Json?     // serialized plan steps
+  created_at  DateTime @default(now())
+  completed_at DateTime?
+  error       String?
+  token_budget BigInt
+  cost_budget  Decimal
+  token_usage  Int
+  cost_usage   Decimal
+}
+
+// ============ Subscriptions & Billing (PRD Sections 104-107, 179-181) ============
+subscription {
+  id         String   @id @default(auto()) @map("_id")
+  user       account  @fields: [id]
+  plan       String    // "free", "go", "pro", "business", "enterprise"
+  status      String    // "active", "canceled", "past_due"
+  token_budget  Int
+  cost_budget   Decimal
+  used_tokens   Int   @default(0)
+  used_cost     Decimal @default(0)
+  current_period_end DateTime
+  createdAt   DateTime @default(now())
+  canceledAt  DateTime?
+}
+
+usage_ledger {
+  id         String   @id @default(auto()) @map("_id")
+  organization String
+  model      String
+  input_tokens  Int   @default(0)
+  output_tokens Int   @default(0)
+  reasoning_tokens Int @default(0)
+  embedding_tokens Int @default(0)
+  cost          Decimal @default(0)
+  createdAt   DateTime @default(now())
+}
+
+// ============ Audit Log (PRD Sections 116, 191) ============
+audit_log {
+  id         String   @id @default(auto()) @map("_id")
+  organization String
+  user        account  @fields: [id]
+  action      String
+  resource    String
+  details      Json?
+  ip_address  String
+  createdAt   DateTime @default(now())
+}
+
+// ============ System Configuration ============
+system_config {
+  key       String   @id
+  value      Json
+  updatedAt  DateTime @updatedAt
+}
