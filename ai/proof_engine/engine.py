@@ -293,9 +293,9 @@ class ProofEngine:
                 id="src_alizia_platform",
                 title="Alizia Certified Knowledge Base & System Documentation",
                 url="https://docs.alizia.ai/knowledge",
-                snippet=full_text[:400] + "...",
+                snippet=full_text,
                 domain="alizia.ai",
-                relevance_score=0.95
+                relevance_score=0.98
             ))
 
         # Step 3: Extract tool runs
